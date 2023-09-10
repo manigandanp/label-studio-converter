@@ -42,6 +42,7 @@ class FormatNotSupportedError(NotImplementedError):
 
 
 class Format(Enum):
+    JSON_TABLE = 13
     JSON = 1
     JSON_MIN = 2
     CSV = 3
@@ -68,6 +69,11 @@ class Format(Enum):
 
 class Converter(object):
     _FORMAT_INFO = {
+        Format.JSON_TABLE: {
+            'title': 'JSON-Tables',
+            'description': "Export extracted tables in json format",
+            'link': 'https://labelstud.io/guide/export.html',
+        },
         Format.JSON: {
             'title': 'JSON',
             'description': "List of items in raw JSON format stored in one JSON file. Use to export both the data "
@@ -191,6 +197,8 @@ class Converter(object):
 
         if format == Format.JSON:
             self.convert_to_json(input_data, output_data, is_dir=is_dir)
+        elif format == Format.JSON_TABLE:
+            self.convert_to_json_table(input_data, output_data, is_dir=is_dir)
         elif format == Format.JSON_MIN:
             self.convert_to_json_min(input_data, output_data, is_dir=is_dir)
         elif format == Format.CSV:
@@ -455,6 +463,57 @@ class Converter(object):
                 json.dump(records, fout, indent=2, ensure_ascii=False)
         else:
             copy2(input_data, output_file)
+
+    def convert_to_json_table(self, input_data, output_dir, is_dir=True):
+        print("isdir", is_dir)
+        def format_result(results):
+            formated_result = []
+            for page in results:
+                page_no = page['page_no']
+                for chunk in page['data']:
+                    result = {'page_no': page_no, 'bbox': chunk['bbox']}
+                    if 'table' in chunk:
+                        header = chunk['table']['header']
+                        header = header['row'] if header is not None else []
+                        rows = chunk['table']['rows']
+                        table = {
+                            'header': {'data': header},
+                            'rows': [{'data': row} for row in rows]
+                        }
+                        table = dict(result, **{'body': '', 'table': table})
+                        formated_result.append(table)
+                    else:
+                        text = dict(
+                            result, **{'body': chunk['text'], 'table': None})
+                        formated_result.append(text)
+            return formated_result
+        self._check_format(Format.JSON_TABLE)
+        ensure_dir(output_dir)
+        output_file = os.path.join(output_dir, 'result.json')
+        records = []
+        item_iterator = self.iter_from_dir if is_dir else self.iter_from_json_file
+        for item in item_iterator(input_data):
+            record = deepcopy(item['input'].get('extracted_tables') or item['input'].get('extracted_table'))
+            if record is not None:
+                records.append(record)
+
+        with io.open(output_file, mode='w', encoding='utf8') as fout:
+            records = format_result(records)
+            json.dump(records, fout, indent=2, ensure_ascii=False)
+
+    def convert_percentage_to_bbox(self, percentage, page_width, page_height):
+        left = percentage["left"] * page_width / 100
+        top = percentage["top"] * page_height / 100
+        width = percentage["width"] * page_width / 100
+        height = percentage["height"] * page_height / 100
+
+        x1 = left
+        y1 = page_height - (top + height)
+        x2 = x1 + width
+        y2 = y1 + height
+
+        return (x1, y1, x2, y2)
+
 
     def convert_to_json_min(self, input_data, output_dir, is_dir=True):
         self._check_format(Format.JSON_MIN)
