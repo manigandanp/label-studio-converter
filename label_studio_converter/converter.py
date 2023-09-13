@@ -17,6 +17,7 @@ from copy import deepcopy
 from PIL import Image
 
 from label_studio_converter.exports import csv2
+from label_studio_converter.table_builder import TableBuilder, prepare_table_data, post_process_table
 
 from label_studio_converter.utils import (
     parse_config,
@@ -439,6 +440,8 @@ class Converter(object):
         return {
             'id': task['id'],
             'input': task['data'],
+            'annotations': task['annotations'],
+            'drafts': task['drafts'],
             'output': outputs or {},
             'completed_by': annotation.get('completed_by', {}),
             'annotation_id': annotation.get('id'),
@@ -465,7 +468,6 @@ class Converter(object):
             copy2(input_data, output_file)
 
     def convert_to_json_table(self, input_data, output_dir, is_dir=True):
-        print("isdir", is_dir)
         def format_result(results):
             formated_result = []
             for page in results:
@@ -494,6 +496,18 @@ class Converter(object):
         item_iterator = self.iter_from_dir if is_dir else self.iter_from_json_file
         for item in item_iterator(input_data):
             record = deepcopy(item['input'].get('extracted_tables') or item['input'].get('extracted_table'))
+            updated_tables = prepare_table_data(item)
+            if updated_tables is not None:
+                rows, columns, headers, tables = updated_tables
+                words = record['words_with_bboxes']
+                page_no = record['page_no']
+                updated_tables = [(TableBuilder().build_table(rows, columns, words, table_bbox, headers), table_bbox) for table_bbox in tables]
+                updated_tables = [post_process_table(header, rows, columns, table_bbox) for ((header, rows, columns), table_bbox) in updated_tables]
+                updated_tables = [{'bbox': t['table_bbox'], 'normalized_table_bbox': t['table_bbox'], 'table': t} for t in updated_tables]
+                record = {
+                    'page_no': page_no,
+                    'data': updated_tables
+                }
             if record is not None:
                 records.append(record)
 
